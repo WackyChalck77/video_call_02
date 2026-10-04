@@ -1,0 +1,12 @@
+{
+	auto_https disable_redirects
+	servers {
+		protocols h1
+	}
+}
+
+192.168.50.154:8443 {
+	tls /home/int-1234/Go/video_call_02/certs/192.168.50.154.pem /home/int-1234/Go/video_call_02/certs/192.168.50.154-key.pem
+	reverse_proxy /ws localhost:7000
+	file_server
+}

@@ -1,0 +1,32 @@
+# Конфиг ion-sfu.
+#
+# ВАЖНО: [router].maxpackettrack обязателен. Без него SFU выделяет пул буферов
+# размером 0 байт (make([]byte, maxpackettrack*1500)) и падает с panic
+# "index out of range [1] with length 0" в pkg/buffer, как только первый участник
+# начинает публиковать видеодорожку. Контейнер умирал, WebSocket разрывался
+# (code 1006), и участники не видели друг друга.
+
+[router]
+# 0 = без ограничения REMB, 1500 = 1.5 Мбит/с
+maxbandwidth = 1500
+# сколько видеопакетов SFU хранит для NACK / ключевых кадров
+maxpackettrack = 500
+audiolevelthreshold = 40
+audiolevelinterval = 1000
+audiolevelfilter = 20
+
+[webrtc]
+# диапазон UDP-портов, который должен быть проброшен в docker
+portrange = [5000, 5200]
+
+[webrtc.candidates]
+nat1to1 = ["192.168.50.154"]
+
+[webrtc.timeouts]
+disconnected = 5
+failed = 25
+keepalive = 2
+
+[log]
+# 0 - INFO, 1 - DEBUG, 2 - TRACE
+v = 0

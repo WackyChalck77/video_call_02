@@ -1,0 +1,37 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Certificates and private keys
+certs/
+*.pem
+*.key
+*.crt
+
+# Dependencies — installed via `npm install` from package-lock.json
+node_modules/
+
+# Local backups
+backups/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+go.work
+go.work.sum
+
+# Logs and temp files
+*.log
+tmp/
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
