@@ -1,0 +1,72 @@
+/*
+ * Оформление страницы. В JS остаётся только логика — здесь всё оформление,
+ * включая то, что раньше задавалось через style.cssText прямо в коде.
+ */
+
+body {
+    font-family: sans-serif;
+    padding: 16px;
+}
+
+h2 {
+    margin-top: 0;
+}
+
+video {
+    width: 100%;
+    max-width: 360px;
+    background: #000;
+    display: block;
+}
+
+button {
+    padding: 12px 24px;
+    font-size: 16px;
+    margin: 8px 0;
+}
+
+select {
+    padding: 8px;
+    font-size: 16px;
+}
+
+/* Переключается из ui.js: setConnectedUi() */
+.hidden {
+    display: none;
+}
+
+#status {
+    color: #666;
+    margin: 8px 0;
+    font-size: 14px;
+}
+
+#videos {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+/* Плитка участника: видео, подпись и таблица статистики под ним */
+.tile {
+    display: inline-block;
+    margin: 4px;
+    vertical-align: top;
+}
+
+.tile__caption {
+    font-size: 12px;
+    color: #666;
+    margin-top: 2px;
+}
+
+.tile__stats {
+    font-size: 12px;
+    color: #333;
+    background: #f0f0f0;
+    padding: 4px;
+    margin-top: 4px;
+    border-radius: 4px;
+    font-family: monospace;
+    white-space: pre;
+    min-width: 160px;
+}
