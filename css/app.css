@@ -4,12 +4,20 @@
  */
 
 body {
-    font-family: sans-serif;
-    padding: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 24px;
+    margin: 0;
+    min-height: 100vh;
+    background: #f5f7fa;
+    color: #333;
 }
 
 h2 {
     margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 24px;
+    color: #1a1a2e;
+    text-align: center;
 }
 
 video {
@@ -17,17 +25,68 @@ video {
     max-width: 360px;
     background: #000;
     display: block;
+    object-fit: cover;
+    border-radius: 8px;
 }
 
 button {
-    padding: 12px 24px;
+    padding: 12px 28px;
     font-size: 16px;
-    margin: 8px 0;
+    margin: 8px 4px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+#joinBtn {
+    background: linear-gradient(135deg, #4caf50, #45a049);
+    color: white;
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+}
+
+#joinBtn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+}
+
+#leaveBtn {
+    background: linear-gradient(135deg, #f44336, #e53935);
+    color: white;
+    box-shadow: 0 2px 8px rgba(244, 67, 54, 0.3);
+}
+
+#leaveBtn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
 }
 
 select {
-    padding: 8px;
-    font-size: 16px;
+    padding: 10px 14px;
+    font-size: 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: white;
+    color: #333;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+select:hover {
+    border-color: #aaa;
+}
+
+select option {
+    background: white;
+    color: #333;
 }
 
 /* Переключается из ui.js: setConnectedUi() */
@@ -36,14 +95,37 @@ select {
 }
 
 #status {
-    color: #666;
-    margin: 8px 0;
+    margin: 12px 0;
     font-size: 14px;
+    font-weight: 500;
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-align: center;
+    background: #f0f0f0;
+    transition: all 0.3s ease;
+}
+
+#status.connected {
+    color: #2e7d32;
+    background: #e8f5e9;
+}
+
+#status.error {
+    color: #c62828;
+    background: #ffebee;
+}
+
+#status.connecting {
+    color: #ef6c00;
+    background: #fff3e0;
 }
 
 #videos {
     display: flex;
     flex-wrap: wrap;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 20px;
 }
 
 /* Плитка участника: видео, подпись и таблица статистики под ним */
@@ -51,22 +133,35 @@ select {
     display: inline-block;
     margin: 4px;
     vertical-align: top;
+    background: white;
+    border-radius: 12px;
+    padding: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 
 .tile__caption {
     font-size: 12px;
     color: #666;
-    margin-top: 2px;
+    margin-top: 6px;
+    text-align: center;
+    font-weight: 500;
 }
 
 .tile__stats {
-    font-size: 12px;
-    color: #333;
-    background: #f0f0f0;
-    padding: 4px;
-    margin-top: 4px;
-    border-radius: 4px;
-    font-family: monospace;
+    font-size: 11px;
+    color: #555;
+    background: #f5f5f5;
+    padding: 6px 8px;
+    margin-top: 6px;
+    border-radius: 6px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
     white-space: pre;
     min-width: 160px;
+    line-height: 1.4;
 }

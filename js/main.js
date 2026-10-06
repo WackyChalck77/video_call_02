@@ -1,34 +1,35 @@
 /*
- * main.js — точка входа. Загружает SDK из глобалов, подключает обработчики кнопок,
+ * main.js — точка входа. Проверяет SDK, подключает обработчики кнопок,
  * запускает сторожа stale и цикл статистики.
  *
- * ion-sdk — UMD-пакет, который устанавливает глобальные конструкторы:
+ * ion-sdk — UMD-пакеты, которые устанавливают глобалы:
  *   globalThis.IonSDK → { Client, LocalStream }
  *   globalThis.Signal → { IonSFUJSONRPCSignal }
  *
  * Обычные <script> выше загружают UMD-бандлы, поэтому при загрузке
- * <script type="module"> глобалы уже доступны.
+ * <script type="module"> глобалы уже доступны. Классы оттуда экспортирует
+ * ./sdk.js — остальные модули берут их только через него.
  */
-
-/* ---- SDK из глобалов ---- */
-
-const { Client, LocalStream } = globalThis.IonSDK;
-const { IonSFUJSONRPCSignal } = globalThis.Signal;
-
-if (!Client || !LocalStream || !IonSFUJSONRPCSignal) {
-    document.getElementById('status').textContent =
-        'SDK не загрузился: проверьте /libs/ion-sdk.min.js и /libs/json-rpc.min.js';
-    throw new Error('ion-sdk UMD bundles are missing');
-}
-
-console.log('SDK loaded:', { Client, LocalStream, IonSFUJSONRPCSignal });
 
 /* ---- Модули проекта ---- */
 
+import { Client, LocalStream, IonSFUJSONRPCSignal, missingSdkParts } from './sdk.js';
 import { join, leave, startStaleWatch } from './room.js';
 import { startStatsLoop } from './stats.js';
 import { logAudioDevices } from './media.js';
 import { QUALITY_PRESETS } from './config.js';
+
+/* ---- Проверка SDK ---- */
+
+const missing = missingSdkParts();
+if (missing.length) {
+    document.getElementById('status').textContent =
+        'SDK не загрузился: не найдено ' + missing.join(', ') +
+        ' — проверьте /libs/ion-sdk.min.js и /libs/json-rpc.min.js';
+    throw new Error('ion-sdk UMD bundles are missing: ' + missing.join(', '));
+}
+
+console.log('SDK loaded:', { Client, LocalStream, IonSFUJSONRPCSignal });
 
 /* ---- Кнопки ---- */
 

@@ -7,24 +7,31 @@
 # (code 1006), и участники не видели друг друга.
 
 [router]
-# 0 = без ограничения REMB, 1500 = 1.5 Мбит/с
-maxbandwidth = 1500
+# 0 = без ограничения REMB
+maxbandwidth = 0
 # сколько видеопакетов SFU хранит для NACK / ключевых кадров
 maxpackettrack = 500
 audiolevelthreshold = 40
 audiolevelinterval = 1000
 audiolevelfilter = 20
+# iOS-совместимость: отправляем video и audio в отдельных MediaStream
+maxtrack = 10
+# Отключаем автоматический даунскейл
+maxtrackbandwidth = 0
+# Отключаем автоматическое ограничение качества (cpu, bandwidth, none)
+qualitylimitationdetection = false
 
 [webrtc]
 # диапазон UDP-портов, который должен быть проброшен в docker
 portrange = [5000, 5200]
 
 [webrtc.candidates]
-nat1to1 = ["192.168.50.154"]
+nat1to1 = ["192.168.88.21"]
 
 [webrtc.timeouts]
-disconnected = 5
-failed = 25
+# Увеличены для мобильных устройств (iOS)
+disconnected = 10
+failed = 30
 keepalive = 2
 
 [log]

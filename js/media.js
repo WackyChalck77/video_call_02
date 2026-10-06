@@ -3,8 +3,11 @@
  *
  * Используем LocalStream из ion-sdk (не navigator.mediaDevices),
  * потому что ion-sdk оборачивает getUserMedia и добавляет свои обработчики.
- * LocalStream доступен как глобал после загрузки /libs/ion-sdk.min.js.
+ * Класс берём из ./sdk.js — он достаёт его из глобала window.IonSDK,
+ * который ставит /libs/ion-sdk.min.js.
  */
+
+import { LocalStream } from './sdk.js';
 
 /**
  * Печатаем, что реально видит браузер — частая причина «звука нет» в том,
@@ -25,7 +28,6 @@ export function logAudioDevices() {
  * Возвращает MediaStream или null.
  */
 export async function acquireLocalStream(videoConstraints) {
-    const LocalStream = globalThis.IonSDK && globalThis.IonSDK.LocalStream;
     if (!LocalStream) {
         console.error('LocalStream не найден в globalThis.IonSDK');
         return null;

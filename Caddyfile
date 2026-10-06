@@ -1,21 +1,18 @@
 {
+	# Свой админ-порт. Дефолтный 2019 занят системным сервисом caddy.service,
+	# и любой «caddy reload/stop» без --address ушёл бы именно в него.
+	admin 127.0.0.1:2020
 	auto_https disable_redirects
 	servers {
 		protocols h1
 	}
 }
 
-# MY_IP/CERT_DIR берутся из окружения (см. start.sh).
-#
-# Подстановка {$VAR:default} выполняется при РАЗБОРЕ Caddyfile — это важно:
-# адрес сайта обязан быть литералом на этапе парсинга, рантайм-плейсхолдер
-# {env.VAR} в адресе не раскроется.
-#
-# Значение по умолчанию нужно писать у КАЖДОГО вхождения: `{$MY_IP:127.0.0.1}`
-# и `{$MY_IP}` — это два разных плейсхолдера, второй без переменной раскроется
-# в пустую строку (и caddy упадёт на открытии файла ".pem").
-{$MY_IP:127.0.0.1}:8443 {
-	tls {$CERT_DIR:certs}/{$MY_IP:127.0.0.1}.pem {$CERT_DIR:certs}/{$MY_IP:127.0.0.1}-key.pem
+# Адрес — только порт, без IP: слушаем все интерфейсы. IP попадает в конфиг
+# только как SAN сертификата (certs/tls.pem), который выпускает ./start.sh,
+# и как nat1to1 в sfu.toml. Поэтому при смене сети Caddyfile не меняется.
+:8443 {
+	tls {$TLS_CRT:certs/tls.pem} {$TLS_KEY:certs/tls-key.pem}
 	reverse_proxy /ws localhost:7000
 	file_server
 }

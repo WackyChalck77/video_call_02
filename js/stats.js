@@ -9,8 +9,20 @@
 import { STATS_INTERVAL_MS } from './config.js';
 import { state, remoteStreams, prevStats } from './state.js';
 import { renderStats } from './ui.js';
+import { peerRttFor, bestPeerRtt, setOwnSfuRtt, prunePeers } from './peerlink.js';
 
 /* ---------- Вспомогательные ---------- */
+
+// Формат задержки: текущий замер плюс разброс по окну сглаживания.
+function fmtMs(value) {
+    return (typeof value === 'number' && isFinite(value)) ? value.toFixed(0) + ' мс' : '—';
+}
+
+function fmtPeerRtt(entry) {
+    if (!entry) return '—';
+    return fmtMs(entry.rtt) + ' (min ' + entry.min.toFixed(0) +
+        ', avg ' + entry.avg.toFixed(0) + ')';
+}
 
 // Битрейт по дельте байт между двумя замерами.
 function bitrateOf(deltaBytes, dtSec, unit) {
@@ -29,34 +41,40 @@ function transports() {
 }
 
 /**
- * Найти нужный RTCPeerConnection.
- * pub  — тот, у кого есть senders; sub — тот, у кого есть receivers, но нет
- * senders, иначе на pub-пире можно увидеть его же пустые receivers.
+ * Найти RTCPeerConnection по trackIdentifier'ам sender'ов.
+ * pub  — тот, у кого есть senders с нашими track id (мы публикуем).
+ * sub  — тот, у кого нет наших track id в senders (мы подписываемся).
  */
 function findPc(kind) {
+    if (!state.localStream) return null;
+    const ourIds = new Set(state.localStream.getTracks().map((t) => t.id));
     for (const t of transports()) {
         const pc = t && t.pc;
         if (!pc) continue;
-        const senders = pc.getSenders().length > 0;
-        const receivers = pc.getReceivers().length > 0;
-        if (kind === 'pub' && senders) return pc;
-        if (kind === 'sub' && receivers && !senders) return pc;
+        const senders = pc.getSenders();
+        const hasOurTracks = senders.some((s) => {
+            const media = s && s.track;
+            return media && ourIds.has(media.id);
+        });
+        if (kind === 'pub' && hasOurTracks) return pc;
+        if (kind === 'sub' && !hasOurTracks && pc.getReceivers().length > 0) return pc;
     }
     return null;
 }
 
-// RTT из успешной пары кандидатов (есть в отчёте обоих пиров).
+// RTT из активной пары кандидатов (in-use — выбранная, succeeded — прошедшая ICE).
 function readRtt(report) {
     let rtt = null;
     report.forEach((s) => {
-        if (s.type === 'candidate-pair' && s.state === 'succeeded' &&
-            s.currentRoundTripTime !== undefined)
-            rtt = s.currentRoundTripTime * 1000;
+        if (s.type === 'candidate-pair' &&
+            (s.state === 'in-use' || s.state === 'succeeded') &&
+            s.currentRoundTripTime !== undefined) {
+            const ms = s.currentRoundTripTime * 1000;
+            if (ms > 0 && (!rtt || ms < rtt)) rtt = ms;
+        }
     });
     return rtt;
 }
-
-const LIMITATION_LABELS = { none: 'нет', cpu: 'CPU', bandwidth: 'канал', other: 'иное' };
 
 /* ---------- Исходящая статистика (наш pub-пир) ---------- */
 
@@ -75,40 +93,63 @@ export async function collectLocalStats() {
 
     try {
         const report = await pc.getStats();
+
         let video = null, audio = null;
         report.forEach((s) => {
-            if (s.type !== 'outbound-rtp' || !ourIds.has(s.trackIdentifier)) return;
-            if (s.kind === 'video' && !video) video = s;
-            if (s.kind === 'audio' && !audio) audio = s;
+            if (s.type !== 'outbound-rtp') return;
+            if (s.trackIdentifier && ourIds.has(s.trackIdentifier)) {
+                if (s.kind === 'video' && !video) video = s;
+                if (s.kind === 'audio' && !audio) audio = s;
+            }
         });
+        
+        // Если не нашли по trackIdentifier, ищем по первому video/audio
+        if (!video) {
+            report.forEach((s) => {
+                if (s.type === 'outbound-rtp' && s.kind === 'video' && !video) video = s;
+            });
+        }
 
         const now = performance.now();
         const prev = prevStats.get('stats_local') || {};
         const dt = prev.timestamp ? (now - prev.timestamp) / 1000 : 0;
         const rtt = readRtt(report);
 
-        let res = '—', fps = '—', sent = '—', limit = '—', nack = '—';
+        // Наш RTT до SFU уезжает собеседникам в ping: на их плитках он
+        // показывает качество их же канала, а не нашего.
+        setOwnSfuRtt(rtt);
+
+        let res = '—', fps = '—', sent = '—', jitter = '—', nack = '—';
         if (video) {
-            if (video.frameWidth && video.frameHeight) res = video.frameWidth + '×' + video.frameHeight;
+            let w = video.frameWidth;
+            let h = video.frameHeight;
+            // Если ширина меньше высоты — поменяем местами (поворот 90°)
+            if (w && h && w < h) {
+                [w, h] = [h, w];
+            }
+            if (w && h) res = w + '×' + h;
             if (video.framesPerSecond !== undefined) fps = Math.round(video.framesPerSecond);
             sent = bitrateOf(video.bytesSent - prev.videoBytes, dt, 'Mbps');
-            limit = LIMITATION_LABELS[video.qualityLimitationReason] || '—';
+            if (video.jitter !== undefined) jitter = (video.jitter * 1000).toFixed(1) + ' мс';
             if (video.nackCount !== undefined) nack = video.nackCount;
         }
+        if (jitter === '—' && audio && audio.jitter !== undefined)
+            jitter = (audio.jitter * 1000).toFixed(1) + ' мс';
         const sentAudio = audio ? bitrateOf(audio.bytesSent - prev.audioBytes, dt, 'kbps') : '—';
 
         prevStats.set('stats_local', {
             timestamp: now,
-            videoBytes: video ? video.bytesSent : prev.videoBytes,
-            audioBytes: audio ? audio.bytesSent : prev.audioBytes
+            videoBytes: video && video.bytesSent !== undefined ? video.bytesSent : prev.videoBytes,
+            audioBytes: audio && audio.bytesSent !== undefined ? audio.bytesSent : prev.audioBytes
         });
 
         renderStats('local', [
-            ['RTT', rtt ? rtt.toFixed(0) + ' мс' : '—'],
-            ['Отправлено', sent],
+            ['RTT до SFU', rtt ? rtt.toFixed(0) + ' мс' : '—'],
+            ['RTT до пира', fmtMs(bestPeerRtt())],
+            ['Битрейт Tx', sent],
             ['Разрешение', res],
+            ['Джиттер', jitter],
             ['FPS', fps],
-            ['Упирается в', limit],
             ['Аудио', sentAudio],
             ['Запросов повтора', nack]
         ]);
@@ -135,6 +176,13 @@ export async function collectRemoteStats(key) {
 
     try {
         const report = await pc.getStats();
+        
+        // Собираем inbound-rtp
+        const inbound = [];
+        report.forEach((s) => {
+            if (s.type === 'inbound-rtp') inbound.push({ kind: s.kind, trackId: s.trackIdentifier });
+        });
+
         let video = null, audio = null;
         report.forEach((s) => {
             if (s.type !== 'inbound-rtp' || !mine(s)) return;
@@ -149,7 +197,13 @@ export async function collectRemoteStats(key) {
 
         let res = '—', fps = '—', jitter = '—';
         if (video) {
-            if (video.frameWidth && video.frameHeight) res = video.frameWidth + '×' + video.frameHeight;
+            let w = video.frameWidth;
+            let h = video.frameHeight;
+            // Если ширина меньше высоты — поменяем местами (поворот 90°)
+            if (w && h && w < h) {
+                [w, h] = [h, w];
+            }
+            if (w && h) res = w + '×' + h;
             if (video.framesPerSecond !== undefined) fps = Math.round(video.framesPerSecond);
             else if (prev.videoFrames !== undefined && dt > 0)
                 fps = Math.round((video.framesDecoded - prev.videoFrames) / dt);
@@ -170,13 +224,19 @@ export async function collectRemoteStats(key) {
             audioBytes: audio ? audio.bytesReceived : prev.audioBytes
         });
 
+        // Замер «до пира» приходит из peerlink: это ping/pong по data channel,
+        // то есть путь через весь SFU, а не только наша ветка до сервера.
+        const link = peerRttFor(key, remoteStreams.size);
+
         renderStats(key, [
-            ['RTT', rtt ? rtt.toFixed(0) + ' мс' : '—'],
-            ['Получено', received],
+            ['RTT до SFU', rtt ? rtt.toFixed(0) + ' мс' : '—'],
+            ['RTT до пира', fmtPeerRtt(link)],
+            ['RTT пира до SFU', link ? fmtMs(link.sfuRtt) : '—'],
+            ['Битрейт Rx', received],
             ['Разрешение', res],
-            ['FPS', fps],
-            ['Дрожание', jitter],
-            ['Аудио', receivedAudio],
+            ['FPS (кадров/с)', fps],
+            ['Джиттер', jitter],
+            ['Аудио битрейт', receivedAudio],
             ['Потери пакетов', lost]
         ]);
     } catch (err) {
@@ -189,6 +249,7 @@ export async function collectRemoteStats(key) {
 export function startStatsLoop() {
     setInterval(() => {
         if (!state.client) return;
+        prunePeers();
         collectLocalStats();
         remoteStreams.forEach((rec, key) => collectRemoteStats(key));
     }, STATS_INTERVAL_MS);

@@ -9,8 +9,18 @@ const LOCAL_CAPTION_COLOR = '#aaa';
 
 /* ---------- Статус ---------- */
 
-export function setStatus(text) {
-    document.getElementById('status').textContent = text;
+export function setStatus(text, type) {
+    const el = document.getElementById('status');
+    el.textContent = text;
+    
+    // Убираем все классы типов
+    el.classList.remove('connected', 'error', 'connecting');
+    
+    // Добавляем класс в зависимости от типа
+    if (type) {
+        el.classList.add(type);
+    }
+    
     console.log('STATUS:', text);
 }
 
@@ -128,7 +138,11 @@ export function playWithSound(el, attempt) {
  */
 export function renderStats(id, rows) {
     const el = document.getElementById('stats-' + id);
-    if (!el) return;
+    if (!el) {
+        console.warn('[stats] element not found:', 'stats-' + id);
+        return;
+    }
+    el.style.display = 'block';
     el.innerHTML = rows.map(([label, value]) =>
         `<div>${label}: ${value}</div>`
     ).join('');

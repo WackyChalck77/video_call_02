@@ -5,9 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>UDP Conference</title>
     <link rel="stylesheet" href="/css/app.css">
+    
+    <!-- iOS Safari: принудительный redirect на HTTPS для non-localhost -->
+    <script>
+        (function() {
+            if (location.protocol !== 'https:' && 
+                location.hostname !== 'localhost' && 
+                location.hostname !== '127.0.0.1') {
+                location.href = 'https:' + window.location.href.substring(window.location.protocol.length);
+            }
+        })();
+    </script>
 </head>
 <body>
-    <h2>Конференция</h2>
+    <h2>VideoCall 2.0 - конферфенция</h2>
 
     <div id="joinPanel">
         <select id="qualitySelect">

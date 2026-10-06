@@ -8,8 +8,10 @@ import {
     STALE_CHECK_INTERVAL_MS, STALE_MS
 } from './config.js';
 import { state, remoteStreams } from './state.js';
+import { Client, IonSFUJSONRPCSignal } from './sdk.js';
 import { acquireLocalStream } from './media.js';
 import { setStatus, setConnectedUi, ensureTile, removeTile, playWithSound, setCaption } from './ui.js';
+import { startLink, stopLink, acceptChannel } from './peerlink.js';
 
 /* ---------- Сигнализация ---------- */
 
@@ -120,11 +122,9 @@ function watchTrack(key, rec, track) {
 
 /* ---------- Сторож stale ---------- */
 
-// ion-sfu при уходе пиббера может как пересогласовать sub-пир (тогда дорожка
+// ion-sfu при уходе публикующего может как пересогласовать sub-пир (тогда дорожка
 // удаляется из MediaStream), так и просто перестать слать RTP (тогда только mute).
 // Поэтому страхуемся таймером: все дорожки потока заглушены дольше STALE_MS — выкидываем.
-import { STALE_CHECK_INTERVAL_MS, STALE_MS } from './config.js';
-
 export function startStaleWatch() {
     setInterval(() => {
         const now = Date.now();
@@ -159,7 +159,7 @@ export async function join(quality) {
     btn.disabled = true;
 
     try {
-        setStatus('Подключение...');
+        setStatus('Подключение...', 'connecting');
 
         // 1) Захват локального потока
         const local = await acquireLocalStream(quality);
@@ -170,15 +170,24 @@ export async function join(quality) {
             setCaption('local', 'Вы', 'var(--local-color, #aaa)');
             el.setAttribute('muted', '');
             el.muted = true;
+            el.srcObject = local;
+            el.play().catch(() => {});
         }
 
         // 2) Сигнализация
-        const signal = new window.IonSFUJSONRPCSignal(SIGNAL_URL);
+        console.log('[join] Creating signal to:', SIGNAL_URL);
+        const signal = new IonSFUJSONRPCSignal(SIGNAL_URL);
         state.signal = signal;
-        await waitSignalOpen(signal);
+        try {
+            await waitSignalOpen(signal);
+            console.log('[join] Signal opened');
+        } catch (err) {
+            console.error('[join] Signal failed:', err);
+            throw new Error('Не удалось подключиться к серверу. Проверьте соединение.');
+        }
 
         // 3) Клиент SFU
-        const client = new window.Client(signal);
+        const client = new Client(signal);
         state.client = client;
         window.__client = client;
         window.__remoteStreams = remoteStreams;
@@ -188,7 +197,7 @@ export async function join(quality) {
             console.log('Signaling closed, code=' + e.code);
             removeAllRemote('signaling closed (code ' + e.code + ')');
             if (state.client) {
-                setStatus('Соединение с SFU потеряно');
+                setStatus('Соединение с SFU потеряно', 'error');
                 setConnectedUi(false);
             }
         };
@@ -221,23 +230,38 @@ export async function join(quality) {
         client.onerrnegotiate = (role, err) => {
             console.error('Negotiation error [role=' + role + ']:', err);
         };
-        client.ondatachannel = (ev) => console.log('App data channel:', ev.channel.label);
+        client.ondatachannel = (ev) => {
+            // Каналы "link:*" забирает peerlink — через них измеряется RTT
+            // между участниками. Всё остальное остаётся приложением клиента.
+            if (acceptChannel(ev.channel)) return;
+            console.log('App data channel:', ev.channel.label);
+        };
 
         // 6) join()
-        const joinPromise = client.join(ROOM_ID, 'user-' + Math.random().toString(36).slice(2, 8));
+        // uid идёт и в SFU, и в метку data channel — по нему собеседники
+        // понимают, чей это канал и к кому относится замер RTT.
+        const uid = 'user-' + Math.random().toString(36).slice(2, 8);
+        state.uid = uid;
+        console.log('[join] Calling client.join() as', uid);
+        const joinPromise = client.join(ROOM_ID, uid);
         const apiTimeout = new Promise((resolve) => setTimeout(() => resolve('api-wait'), JOIN_TIMEOUT_MS));
-        const joinState = await Promise.race([joinPromise.then(() => 'joined'), apiTimeout]);
-        console.log('join() state:', joinState);
+        try {
+            const joinState = await Promise.race([joinPromise.then(() => 'joined'), apiTimeout]);
+            console.log('[join] join() state:', joinState);
+            
+            // 7) Подписка на события PC
+            const transports = client.transports;
+            if (transports) {
+                const list = transports instanceof Map ? [...transports.values()] : Object.values(transports);
+                list.forEach((t, i) => watchPeer(i === 0 ? 'pub' : 'sub', t && t.pc));
+            }
 
-        // 7) Подписка на события PC
-        const transports = client.transports;
-        if (transports) {
-            const list = transports instanceof Map ? [...transports.values()] : Object.values(transports);
-            list.forEach((t, i) => watchPeer(i === 0 ? 'pub' : 'sub', t && t.pc));
-        }
-
-        if (joinState !== 'joined') {
-            setStatus('Подключено, жду служебный канал SFU...');
+            if (joinState !== 'joined') {
+                setStatus('Подключено, жду служебный канал SFU...', 'connecting');
+            }
+        } catch (err) {
+            console.error('[join] client.join() failed:', err);
+            throw new Error('Не удалось войти в комнату: ' + errText(err));
         }
 
         // 8) Публикация
@@ -248,18 +272,22 @@ export async function join(quality) {
             if (!kinds.includes('audio')) {
                 console.warn('Внимание: аудиодорожки нет — вас не услышат');
             }
-            setStatus('В эфире');
+            setStatus('В эфире', 'connected');
         } else {
             console.log('Joined in receive-only mode');
-            setStatus('Режим только приёма');
+            setStatus('Режим только приёма', 'connected');
         }
 
-        // 9) Показываем «Отключиться», прячем «Присоединиться»
+        // 9) Канал взаимных пингов. После publish(), чтобы пересогласование
+        // из-за нового канала не мешало первой публикации дорожек.
+        startLink(client);
+
+        // 10) Показываем «Отключиться», прячем «Присоединиться»
         setConnectedUi(true);
 
     } catch (err) {
         console.error('Join failed:', err);
-        setStatus('Ошибка: ' + errText(err));
+        setStatus('Ошибка: ' + errText(err), 'error');
         setConnectedUi(false);
     } finally {
         // Разблокируем кнопку в любом случае (успех или ошибка)
@@ -273,7 +301,7 @@ export async function leave() {
     const btn = document.getElementById('leaveBtn');
     if (btn.disabled) return;
     btn.disabled = true;
-    setStatus('Отключение...');
+    setStatus('Отключение...', 'connecting');
 
     // 1) Останавливаем свои треки
     if (state.localStream) {
@@ -287,7 +315,10 @@ export async function leave() {
     // 3) Чистим все чужие фреймы
     removeAllRemote('leave() called');
 
-    // 4) Закрываем PeerConnection-ы и сигнализацию
+    // 4) Останавливаем взаимные пинги (канал живёт на pub-пире)
+    stopLink();
+
+    // 5) Закрываем PeerConnection-ы и сигнализацию
     try {
         if (state.client && typeof state.client.leave === 'function') {
             await state.client.leave();
@@ -310,13 +341,14 @@ export async function leave() {
         console.warn('signal.close() failed:', err);
     }
 
-    // 5) Снимаем ссылки
+    // 6) Снимаем ссылки
     state.client = null;
     state.signal = null;
+    state.uid = null;
     window.__client = null;
     window.__remoteStreams = null;
 
-    // 6) Возвращаем UI в исходное состояние
-    setStatus('Отключено');
+    // 7) Возвращаем UI в исходное состояние
+    setStatus('Отключено', '');
     setConnectedUi(false);
 }

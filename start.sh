@@ -1,96 +1,127 @@
 #!/usr/bin/env bash
-# start.sh — запускать при каждой смене сети:
-#   ./start.sh                    # автоопределение IP
-#   ./start.sh -i 10.0.100.77     # явный IP
-#   ./start.sh --ip 10.0.100.77   # длинный флаг
 #
-# Скрипт:
-# 1) Определяет IP (флаг > автоопределение).
-# 2) Генерирует сертификат mkcert, если его нет.
-# 3) Обновляет sfu.toml: nat1to1 → текущий IP.
-# 4) Перезапускает ion-sfu, если sfu.toml изменился.
-# 5) Запускает Caddy.
+# Запуск видео-звонка в текущей сети.
+#
+#   ./start.sh 192.168.50.154          запуск с указанием своего адреса
+#   ./start.sh 10.0.100.77 --no-run    только подготовить конфиги
+#   ./start.sh --stop                  остановить Caddy, запущенный этим скриптом
+#
+# IP не определяется автоматически: вы приходите в известную сеть и знаете
+# свой адрес, поэтому он передан явно. Он нужен ровно в двух местах — оба
+# обновляет этот скрипт:
+#
+#   1. SAN сертификата (certs/tls.pem)  — иначе браузер отклонит wss://
+#   2. nat1to1 в sfu.toml               — иначе ICE не сойдётся: SFU будет
+#      advertise адрес из другой сети
+#
+# Caddyfile не меняется: в нём только порт :8443.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-CERT_DIR="certs"
+CERT="certs/tls.pem"
+CERT_KEY="certs/tls-key.pem"
 SFU_TOML="sfu.toml"
+SFU_CONTAINER="ion-sfu"
+PORT=8443
+ADMIN="127.0.0.1:2020"   # не 2019: он занят системным caddy.service
 
-# ---------- Аргументы ----------
+# ---------- остановка ----------
 
-MY_IP=""
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -i|--ip) MY_IP="$2"; shift 2 ;;
-        --ip=*)  MY_IP="${1#*=}"; shift ;;
-        *)       shift ;;
-    esac
-done
-
-# ---------- Автоопределение ----------
-
-if [[ -z "$MY_IP" ]]; then
-    MY_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7}' | head -1)"
-    if [[ -z "$MY_IP" ]]; then
-        echo "❌ Не удалось определить IP-адрес."
-        echo "   Укажите явно: $0 -i <IP>"
-        exit 1
-    fi
-    echo "🔍 Автоопределение: IP = $MY_IP"
-else
-    echo "📌 IP задан явно: $MY_IP"
+if [[ "${1:-}" == "--stop" ]]; then
+    caddy stop --address "$ADMIN" 2>/dev/null || echo "Наш Caddy не запущен."
+    exit 0
 fi
 
-# ---------- Сертификат ----------
+MY_IP="${1:-}"
+[[ "${2:-}" == "--no-run" ]] && RUN=0 || RUN=1
 
-CERT="$CERT_DIR/$MY_IP.pem"
-CERT_KEY="$CERT_DIR/$MY_IP-key.pem"
-
-if [[ ! -f "$CERT" || ! -f "$CERT_KEY" ]]; then
-    echo "📜 Генерация сертификата mkcert для $MY_IP..."
-    # mkcert: root CA уже установлен (`mkcert -install`),
-    # сертификаты подписываются локально доверенным CA.
-    mkdir -p "$CERT_DIR"
-    mkcert -cert-file "$CERT" -key-file "$CERT_KEY" "$MY_IP"
-    echo "   ✅ $CERT, $CERT_KEY"
-else
-    echo "📜 Сертификат уже есть: $CERT"
+if [[ ! "$MY_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    echo "Нужен IPv4-адрес этого компьютера в текущей сети."
+    echo "Узнать:  ip -4 -o addr show scope global"
+    echo "Запуск:  ./start.sh <IP>      (например ./start.sh 192.168.50.154)"
+    exit 1
 fi
 
-export MY_IP
-export CERT_DIR="$SCRIPT_DIR/$CERT_DIR"
+echo "IP: $MY_IP"
 
-# ---------- sfu.toml ----------
+# ---------- сертификат ----------
 
-# ion-sfu читает nat1to1 при старте. Проверяем, совпадает ли IP в конфиге.
-# Файл примонтирован в контейнер (bind, rw), поэтому достаточно правки на хосте
-# и docker restart.
-SFU_CHANGED=0
-if ! grep -q "nat1to1 = \[\"$MY_IP\"\]" "$SFU_TOML"; then
-    echo "🔄 Обновляю sfu.toml: nat1to1 → $MY_IP"
+if [[ ! -f "$(mkcert -CAROOT)/rootCA.pem" ]]; then
+    echo "Локальный CA не установлен. Выполните: mkcert -install"
+    exit 1
+fi
+
+mkdir -p certs
+
+# Перевыпускаем только если в SAN нет нужного адреса — иначе повторный запуск
+# в той же сети ничего не трогает.
+if [[ -f "$CERT" ]] \
+   && openssl x509 -in "$CERT" -noout -ext subjectAltName 2>/dev/null \
+        | grep -qE "IP Address:$MY_IP(,|$)"; then
+    echo "Сертификат подходит (в SAN есть $MY_IP): $CERT"
+else
+    echo "Выпускаю сертификат на $MY_IP, 127.0.0.1, localhost, $(hostname)"
+    mkcert -cert-file "$CERT" -key-file "$CERT_KEY" \
+        "$MY_IP" 127.0.0.1 localhost "$(hostname)" >/dev/null
+fi
+
+# ---------- SFU ----------
+
+if grep -q "nat1to1 = \[\"$MY_IP\"\]" "$SFU_TOML"; then
+    echo "sfu.toml: nat1to1 уже $MY_IP"
+else
     sed -i "s|nat1to1 = \[.*\]|nat1to1 = [\"$MY_IP\"]|" "$SFU_TOML"
-    SFU_CHANGED=1
-else
-    echo "📋 sfu.toml: nat1to1 уже $MY_IP"
-fi
-
-if [[ "$SFU_CHANGED" == 1 ]]; then
-    if docker ps --format '{{.Names}}' | grep -qx 'ion-sfu'; then
-        echo "   Перезапускаю контейнер ion-sfu..."
-        docker restart ion-sfu >/dev/null && echo "   ✅ ion-sfu перезапущен"
+    echo "sfu.toml: nat1to1 → $MY_IP"
+    if docker ps --format '{{.Names}}' | grep -qx "$SFU_CONTAINER"; then
+        docker restart "$SFU_CONTAINER" >/dev/null && echo "Контейнер $SFU_CONTAINER перезапущен"
+    elif docker ps -a --format '{{.Names}}' | grep -qx "$SFU_CONTAINER"; then
+        docker start "$SFU_CONTAINER" >/dev/null && echo "Контейнер $SFU_CONTAINER запущен"
     else
-        echo "   ⚠️  Контейнер ion-sfu не запущен — применится при следующем старте."
+        echo "ВНИМАНИЕ: контейнера $SFU_CONTAINER нет. Создать:"
+        echo "  docker run -d --name $SFU_CONTAINER -p 7000:7000 -p 5000-5200:5000-5200/udp \\"
+        echo "    -v \"$SCRIPT_DIR/$SFU_TOML:/configs/$SFU_TOML:ro\" \\"
+        echo "    pionwebrtc/ion-sfu:latest-jsonrpc -c /configs/$SFU_TOML"
     fi
 fi
 
 # ---------- Caddy ----------
 
-echo ""
-echo "✅ Запуск: caddy run --config Caddyfile"
-echo "   URL: https://$MY_IP:8443"
-echo ""
+export TLS_CRT="$SCRIPT_DIR/$CERT"
+export TLS_KEY="$SCRIPT_DIR/$CERT_KEY"
 
-caddy run --config Caddyfile
+caddy validate --config Caddyfile --adapter caddyfile >/dev/null 2>&1 || {
+    echo "Caddyfile не проходит проверку:"
+    caddy validate --config Caddyfile --adapter caddyfile 2>&1 | tail -3
+    exit 1
+}
+
+# Публичный сертификат нашего CA (не ключ) кладём в раздаваемый каталог,
+# чтобы второе устройство можно было настроить без консоли.
+cp -f "$(mkcert -CAROOT)/rootCA.pem" certs/rootCA.pem
+
+echo
+echo "Откройте:            https://$MY_IP:$PORT"
+echo "Собеседник в сети:   https://$MY_IP:$PORT"
+echo
+echo "Чтобы чужое устройство не блокировало wss://, ему нужно доверять нашему CA."
+echo "Скачать сертификат CA:  https://$MY_IP:$PORT/certs/rootCA.pem"
+echo "(импорт в доверенные корневые; на Android/iOS — установка профиля). "
+echo
+
+if [[ "$RUN" == 0 ]]; then
+    echo "Конфигурация готова (--no-run). Запуск: ./start.sh $MY_IP"
+    exit 0
+fi
+
+# Отдельный админ-порт и явный --address: иначе команда управления уйдёт в
+# системный caddy.service, а не в наш экземпляр.
+if caddy reload --config Caddyfile --adapter caddyfile --address "$ADMIN" >/dev/null 2>&1; then
+    echo "Наш Caddy уже работал — перечитали конфиг."
+    exit 0
+fi
+
+echo "Запускаю Caddy (Ctrl+C — остановить)."
+exec caddy run --config Caddyfile --adapter caddyfile

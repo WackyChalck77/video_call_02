@@ -16,6 +16,8 @@
 
 Самоподписанный сертификат кладётся в `certs/` (в git не попадает):
 
+docker restart ion-sfu
+
 ```bash
 docker run -d --name ion-sfu --network host \
   -v "$PWD/sfu.toml":/configs/sfu.toml:ro \
