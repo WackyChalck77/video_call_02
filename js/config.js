@@ -9,12 +9,18 @@ export const ROOM_ID = 'demo-room';
  * Ограничения на захват. width/height/frameRate заданы через ideal, а не exact:
  * при exact браузер вернет OverconstrainedError, если камера не отдаёт ровно
  * такое разрешение (например, при --use-fake-device-for-media-stream).
+ *
+ * Пресеты подобраны под реальные режимы камеры:
+ *   320×180, 640×360, 1024×576, 1280×720
  */
 export const QUALITY_PRESETS = {
-    low:    { width: { ideal: 320 },  height: { ideal: 240 },  frameRate: { ideal: 10, max: 30 } },
-    medium: { width: { ideal: 640 },  height: { ideal: 480 },  frameRate: { ideal: 20, max: 30 } },
-    high:   { width: { ideal: 1280 }, height: { ideal: 720 },  frameRate: { ideal: 30, max: 60 } }
+    low:    { width: { ideal: 320 },  height: { ideal: 180 },  frameRate: { ideal: 15, max: 15 } },
+    medium: { width: { ideal: 640 },  height: { ideal: 360 },  frameRate: { ideal: 25, max: 25 } },
+    high:   { width: { ideal: 1024 }, height: { ideal: 576 }, frameRate: { ideal: 30, max: 30 } },
+    ultra:  { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
 };
+   
+
 
 /*
  * Адрес сигнализации. По HTTPS идём через TLS-фронт Caddy (wss :8443/ws),

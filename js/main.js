@@ -18,6 +18,7 @@ import { join, leave, startStaleWatch } from './room.js';
 import { startStatsLoop } from './stats.js';
 import { logAudioDevices } from './media.js';
 import { QUALITY_PRESETS } from './config.js';
+import { initExpandKeyboard, toggleVideoMute, toggleAudioMute, resetMuteState } from './ui.js';
 
 /* ---- Проверка SDK ---- */
 
@@ -39,10 +40,14 @@ document.getElementById('joinBtn').onclick = async () => {
 };
 
 document.getElementById('leaveBtn').onclick = leave;
+document.getElementById('videoMuteBtn').onclick = toggleVideoMute;
+document.getElementById('audioMuteBtn').onclick = toggleAudioMute;
 
 /* ---- Инициализация фоновых процессов ---- */
 
 startStaleWatch();
 startStatsLoop();
+initExpandKeyboard();
+resetMuteState();
 
 logAudioDevices();

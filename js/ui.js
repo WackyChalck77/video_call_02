@@ -2,7 +2,7 @@
  * DOM-логики: статус, кнопки, плитки видео, статистика, разблокировка аудио.
  */
 
-import { prevStats } from './state.js';
+import { prevStats, state } from './state.js';
 
 // Предустановленный цвет для подписи "Местный".
 const LOCAL_CAPTION_COLOR = '#aaa';
@@ -29,14 +29,68 @@ export function setStatus(text, type) {
 export function setConnectedUi(connected) {
     const joinBtn = document.getElementById('joinBtn');
     const leaveBtn = document.getElementById('leaveBtn');
+    const muteBtns = document.getElementById('muteBtns');
     joinBtn.style.display = connected ? 'none' : 'inline-block';
     joinBtn.disabled = false;
     leaveBtn.style.display = connected ? 'inline-block' : 'none';
     leaveBtn.disabled = false;
     document.getElementById('qualitySelect').disabled = connected;
+    
+    if (muteBtns) {
+        muteBtns.classList.toggle('hidden', !connected);
+    }
+}
+
+/* ---------- Отключение видео/аудио ---------- */
+
+let videoMuted = false;
+let audioMuted = false;
+
+export function toggleVideoMute() {
+    if (!state.localStream) return;
+    const videoTrack = state.localStream.getVideoTracks()[0];
+    if (!videoTrack) return;
+    
+    videoMuted = !videoMuted;
+    videoTrack.enabled = !videoMuted;
+    
+    const btn = document.getElementById('videoMuteBtn');
+    btn.textContent = videoMuted ? 'Видео выкл' : 'Видео вкл';
+    btn.classList.toggle('muted', videoMuted);
+}
+
+export function toggleAudioMute() {
+    if (!state.localStream) return;
+    const audioTrack = state.localStream.getAudioTracks()[0];
+    if (!audioTrack) return;
+    
+    audioMuted = !audioMuted;
+    audioTrack.enabled = !audioMuted;
+    
+    const btn = document.getElementById('audioMuteBtn');
+    btn.textContent = audioMuted ? 'Микрофон выкл' : 'Микрофон вкл';
+    btn.classList.toggle('muted', audioMuted);
+}
+
+export function resetMuteState() {
+    videoMuted = false;
+    audioMuted = false;
+    const videoBtn = document.getElementById('videoMuteBtn');
+    const audioBtn = document.getElementById('audioMuteBtn');
+    if (videoBtn) {
+        videoBtn.textContent = 'Видео вкл';
+        videoBtn.classList.remove('muted');
+    }
+    if (audioBtn) {
+        audioBtn.textContent = 'Микрофон вкл';
+        audioBtn.classList.remove('muted');
+    }
 }
 
 /* ---------- Плитка видео ---------- */
+
+// Текущая увеличенная плитка
+let expandedTile = null;
 
 /**
  * Получить или создать обёртку .tile, <video> и (если нужно) таблицу статистики.
@@ -72,7 +126,67 @@ export function ensureTile(id, { stats }) {
         wrapper.appendChild(div);
     }
 
+    // Двойной клик по видео — увеличение/уменьшение
+    el.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        toggleExpandTile(id);
+    });
+
+    // Клик по самой плитке — тоже увеличение
+    wrapper.addEventListener('click', (e) => {
+        // Игнорируем клики по статистике
+        if (e.target.closest('.tile__stats')) return;
+        toggleExpandTile(id);
+    });
+
     return { wrapper, el };
+}
+
+/**
+ * Переключить увеличение плитки.
+ * @param {string} id - идентификатор плитки
+ */
+export function toggleExpandTile(id) {
+    const wrapper = document.getElementById('wrapper-' + id);
+    if (!wrapper) return;
+
+    // Если эта плитка уже увеличена — закрываем
+    if (expandedTile === id) {
+        closeExpandTile();
+        return;
+    }
+
+    // Если другая плитка увеличена — сначала закрываем её
+    if (expandedTile) {
+        closeExpandTile();
+    }
+
+    // Увеличиваем
+    wrapper.classList.add('tile--expanded');
+    expandedTile = id;
+}
+
+/**
+ * Закрыть увеличенную плитку.
+ */
+export function closeExpandTile() {
+    if (!expandedTile) return;
+    const wrapper = document.getElementById('wrapper-' + expandedTile);
+    if (wrapper) {
+        wrapper.classList.remove('tile--expanded');
+    }
+    expandedTile = null;
+}
+
+/**
+ * Инициализация обработчика ESC для закрытия увеличенной плитки.
+ */
+export function initExpandKeyboard() {
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && expandedTile) {
+            closeExpandTile();
+        }
+    });
 }
 
 /**

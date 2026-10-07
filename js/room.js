@@ -10,7 +10,7 @@ import {
 import { state, remoteStreams } from './state.js';
 import { Client, IonSFUJSONRPCSignal } from './sdk.js';
 import { acquireLocalStream } from './media.js';
-import { setStatus, setConnectedUi, ensureTile, removeTile, playWithSound, setCaption } from './ui.js';
+import { setStatus, setConnectedUi, ensureTile, removeTile, playWithSound, setCaption, closeExpandTile, resetMuteState } from './ui.js';
 import { startLink, stopLink, acceptChannel } from './peerlink.js';
 
 /* ---------- Сигнализация ---------- */
@@ -348,7 +348,11 @@ export async function leave() {
     window.__client = null;
     window.__remoteStreams = null;
 
-    // 7) Возвращаем UI в исходное состояние
+    // 7) Закрываем увеличенную плитку и сбрасываем mute
+    closeExpandTile();
+    resetMuteState();
+
+    // 8) Возвращаем UI в исходное состояние
     setStatus('Отключено', '');
     setConnectedUi(false);
 }
