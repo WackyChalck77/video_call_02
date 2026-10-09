@@ -126,20 +126,33 @@ export function ensureTile(id, { stats }) {
         wrapper.appendChild(div);
     }
 
-    // Двойной клик по видео — увеличение/уменьшение
-    el.addEventListener('dblclick', (e) => {
-        e.preventDefault();
-        toggleExpandTile(id);
-    });
-
-    // Клик по самой плитке — тоже увеличение
-    wrapper.addEventListener('click', (e) => {
-        // Игнорируем клики по статистике
-        if (e.target.closest('.tile__stats')) return;
-        toggleExpandTile(id);
-    });
-
     return { wrapper, el };
+}
+
+/**
+ * Инициализация делегирования кликов по плиткам видео.
+ */
+export function initTileClicks() {
+    const container = document.getElementById('videos');
+    if (!container) return;
+
+    // Двойной клик по видео
+    container.addEventListener('dblclick', (e) => {
+        const video = e.target.closest('video');
+        if (!video) return;
+        e.preventDefault();
+        const id = video.id.replace('video-', '');
+        toggleExpandTile(id);
+    });
+
+    // Одиночный клик по плитке (не по статистике)
+    container.addEventListener('click', (e) => {
+        if (e.target.closest('.tile__stats')) return;
+        const tile = e.target.closest('.tile');
+        if (!tile) return;
+        const id = tile.id.replace('wrapper-', '');
+        toggleExpandTile(id);
+    });
 }
 
 /**

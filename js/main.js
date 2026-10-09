@@ -18,7 +18,7 @@ import { join, leave, startStaleWatch } from './room.js';
 import { startStatsLoop } from './stats.js';
 import { logAudioDevices } from './media.js';
 import { QUALITY_PRESETS } from './config.js';
-import { initExpandKeyboard, toggleVideoMute, toggleAudioMute, resetMuteState } from './ui.js';
+import { initExpandKeyboard, initTileClicks, toggleVideoMute, toggleAudioMute, resetMuteState } from './ui.js';
 
 /* ---- Проверка SDK ---- */
 
@@ -48,6 +48,7 @@ document.getElementById('audioMuteBtn').onclick = toggleAudioMute;
 startStaleWatch();
 startStatsLoop();
 initExpandKeyboard();
+initTileClicks();
 resetMuteState();
 
 logAudioDevices();
